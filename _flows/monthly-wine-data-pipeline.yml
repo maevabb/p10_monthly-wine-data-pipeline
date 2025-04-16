@@ -1,7 +1,23 @@
 id: monthly-wine-data-pipeline
-namespace: bottleneck
+namespace: bottleneck.reports
 
 tasks:
-  - id: hello
-    type: io.kestra.plugin.core.log.Log
-    message: Hello World! 🚀
+  - id: convert_excels
+    type: io.kestra.plugin.core.flow.WorkingDirectory
+    tasks:
+      - id: clone_repo
+        type: io.kestra.plugin.git.Clone
+        url: https://github.com/maevabb/p10_monthly-wine-data-pipeline.git
+        branch: main
+
+      - id: run_script
+        type: io.kestra.plugin.scripts.python.Commands
+        containerImage: ghcr.io/kestra-io/pydata:latest
+        beforeCommands:
+          - pip install pandas openpyxl
+        commands:
+          - python scripts/xlsx_to_csv.py
+        outputFiles:
+          - data/erp.csv
+          - data/web.csv
+          - data/liaison.csv
