@@ -4,6 +4,7 @@ namespace: bottleneck.reports
 tasks:
   - id: convert_excels
     type: io.kestra.plugin.core.flow.WorkingDirectory
+
     tasks:
       - id: clone_repo
         type: io.kestra.plugin.git.Clone
@@ -18,6 +19,130 @@ tasks:
         commands:
           - python scripts/xlsx_to_csv.py
         outputFiles:
-          - data/erp.csv
-          - data/web.csv
-          - data/liaison.csv
+          - erp.csv
+          - web.csv
+          - liaison.csv
+  
+  - id: clean_missing_tasks
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+    - id: clean_missing_erp
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      inputFiles:
+        erp.csv: '{{ outputs.run_script["outputFiles"]["erp.csv"] }}'
+      fetchType: FETCH
+      sql: |
+        CREATE OR REPLACE TABLE erp AS
+        SELECT *
+        FROM read_csv_auto('erp.csv', header=True)
+        WHERE product_id IS NOT NULL;
+        
+        SELECT COUNT(*) AS erp_cleaned_rows FROM erp;
+
+    - id: clean_missing_liaison
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      inputFiles:
+        liaison.csv: '{{ outputs.run_script["outputFiles"]["liaison.csv"] }}'
+      fetchType: FETCH
+      sql: |
+        CREATE OR REPLACE TABLE liaison AS
+        SELECT *
+        FROM read_csv_auto('liaison.csv', header=True)
+        WHERE product_id IS NOT NULL;
+        
+        SELECT COUNT(*) AS liaison_cleaned_rows FROM liaison;
+
+    - id: clean_missing_web
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      inputFiles:
+        web.csv: '{{ outputs.run_script["outputFiles"]["web.csv"] }}'
+      fetchType: FETCH
+      sql: |
+        CREATE OR REPLACE TABLE web AS
+        SELECT *
+        FROM read_csv_auto('web.csv', header=True)
+        WHERE sku IS NOT NULL;
+        
+        SELECT COUNT(*) AS web_cleaned_rows FROM web;
+
+  - id: clean_duplicated_tasks
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+    - id: clean_duplicated_erp
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        CREATE OR REPLACE TABLE erp AS
+        SELECT *
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY product_id) AS row_num
+          FROM erp
+          )
+        WHERE row_num = 1;
+        
+        SELECT COUNT(*) AS erp_cleaned_rows FROM erp;
+
+    - id: clean_duplicated_liaison
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        CREATE OR REPLACE TABLE liaison AS
+        SELECT *
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY product_id) AS row_num
+          FROM liaison
+          )
+        WHERE row_num = 1;
+        
+        SELECT COUNT(*) AS liaison_cleaned_rows FROM liaison;
+
+    - id: clean_duplicated_web
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        CREATE OR REPLACE TABLE web AS
+        SELECT *
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY sku ORDER BY total_sales DESC) AS row_num
+          FROM web
+          )
+        WHERE row_num = 1;
+        
+        SELECT COUNT(*) AS web_cleaned_rows FROM web;
+
+  - id: join_erp_web
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+    fetchOne: true
+    sql: |
+      CREATE OR REPLACE TABLE full_data AS
+      SELECT *
+      FROM erp
+      JOIN liaison ON erp.product_id = liaison.product_id
+      JOIN web ON liaison.id_web = web.sku;
+
+      SELECT COUNT(*) AS full_data_row_count FROM full_data;
+
+  - id: sales_report
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+    fetchOne: true
+    sql: |
+      CREATE OR REPLACE TABLE sales_report AS
+      SELECT 
+        full_data.product_id,
+        full_data.sku,
+        full_data.post_title,
+        full_data.total_sales,
+        full_data.price,
+        ROUND(full_data.total_sales * full_data.price, 2) AS CA
+      FROM full_data;
+
+      SELECT ROUND(SUM(CA), 2) AS total_CA FROM sales_report;
+  
