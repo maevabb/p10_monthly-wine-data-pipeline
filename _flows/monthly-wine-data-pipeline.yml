@@ -1,0 +1,7 @@
+id: monthly-wine-data-pipeline
+namespace: bottleneck
+
+tasks:
+  - id: hello
+    type: io.kestra.plugin.core.log.Log
+    message: Hello World! 🚀
