@@ -36,3 +36,31 @@ tasks:
       WHERE product_id IS NOT NULL;
       
       SELECT COUNT(*) AS erp_cleaned_rows FROM erp;
+
+  - id: clean_missing_liaison
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:'
+    inputFiles:
+      liaison.csv: '{{ outputs.run_script["outputFiles"]["liaison.csv"] }}'
+    fetchType: FETCH
+    sql: |
+      CREATE OR REPLACE TABLE liaison AS
+      SELECT *
+      FROM read_csv_auto('liaison.csv', header=True)
+      WHERE product_id IS NOT NULL;
+      
+      SELECT COUNT(*) AS liaison_cleaned_rows FROM liaison;
+
+  - id: clean_missing_web
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:'
+    inputFiles:
+      web.csv: '{{ outputs.run_script["outputFiles"]["web.csv"] }}'
+    fetchType: FETCH
+    sql: |
+      CREATE OR REPLACE TABLE web AS
+      SELECT *
+      FROM read_csv_auto('web.csv', header=True)
+      WHERE sku IS NOT NULL;
+      
+      SELECT COUNT(*) AS web_cleaned_rows FROM web;
