@@ -4,6 +4,7 @@ namespace: bottleneck.reports
 tasks:
   - id: convert_excels
     type: io.kestra.plugin.core.flow.WorkingDirectory
+
     tasks:
       - id: clone_repo
         type: io.kestra.plugin.git.Clone
@@ -18,6 +19,20 @@ tasks:
         commands:
           - python scripts/xlsx_to_csv.py
         outputFiles:
-          - data/erp.csv
-          - data/web.csv
-          - data/liaison.csv
+          - erp.csv
+          - web.csv
+          - liaison.csv
+      
+  - id: clean_missing_erp
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:'
+    inputFiles:
+      erp.csv: '{{ outputs.run_script["outputFiles"]["erp.csv"] }}'
+    fetchType: FETCH
+    sql: |
+      CREATE OR REPLACE TABLE erp AS
+      SELECT *
+      FROM read_csv_auto('erp.csv', header=True)
+      WHERE product_id IS NOT NULL;
+      
+      SELECT COUNT(*) AS erp_cleaned_rows FROM erp;
