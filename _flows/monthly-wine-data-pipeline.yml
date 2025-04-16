@@ -109,9 +109,40 @@ tasks:
         CREATE OR REPLACE TABLE web AS
         SELECT *
         FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY sku ORDER BY sku) AS row_num
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY sku ORDER BY total_sales DESC) AS row_num
           FROM web
           )
         WHERE row_num = 1;
         
         SELECT COUNT(*) AS web_cleaned_rows FROM web;
+
+  - id: join_erp_web
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+    fetchOne: true
+    sql: |
+      CREATE OR REPLACE TABLE full_data AS
+      SELECT *
+      FROM erp
+      JOIN liaison ON erp.product_id = liaison.product_id
+      JOIN web ON liaison.id_web = web.sku;
+
+      SELECT COUNT(*) AS full_data_row_count FROM full_data;
+
+  - id: sales_report
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+    fetchOne: true
+    sql: |
+      CREATE OR REPLACE TABLE sales_report AS
+      SELECT 
+        full_data.product_id,
+        full_data.sku,
+        full_data.post_title,
+        full_data.total_sales,
+        full_data.price,
+        ROUND(full_data.total_sales * full_data.price, 2) AS CA
+      FROM full_data;
+
+      SELECT ROUND(SUM(CA), 2) AS total_CA FROM sales_report;
+  
