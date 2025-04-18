@@ -199,5 +199,23 @@ tasks:
       premium_wines.to_csv("premium_wines.csv", index=False)
       ordinary_wines.to_csv("ordinary_wines.csv", index=False)
 
+  - id: export_premium_wines_to_s3
+    type: io.kestra.plugin.aws.s3.Upload
+    region: "{{ secret('AWS_REGION') }}"
+    accessKeyId: "{{ secret('AWS_ACCESS_KEY_ID') }}"
+    secretKeyId: "{{ secret('AWS_ACCESS_KEY') }}"
+    bucket: p10-bottleneck-reports
+    from: '{{ outputs.identify_premium_wines["outputFiles"]["premium_wines.csv"] }}'
+    key: wines/premium_wines_{{ now() | date("yyyy-MM") }}.csv  
+
+  - id: export_ordinary_wines_to_s3
+    type: io.kestra.plugin.aws.s3.Upload
+    region: "{{ secret('AWS_REGION') }}"
+    accessKeyId: "{{ secret('AWS_ACCESS_KEY_ID') }}"
+    secretKeyId: "{{ secret('AWS_ACCESS_KEY') }}"
+    bucket: p10-bottleneck-reports
+    from: '{{ outputs.identify_premium_wines["outputFiles"]["ordinary_wines.csv"] }}'
+    key: wines/ordinary_wines_{{ now() | date("yyyy-MM") }}.csv  
+
     
   
