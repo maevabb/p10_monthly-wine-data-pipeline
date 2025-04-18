@@ -145,4 +145,24 @@ tasks:
       FROM full_data;
 
       SELECT ROUND(SUM(CA), 2) AS total_CA FROM sales_report;
+
+      COPY (SELECT * FROM sales_report) TO '{{ outputFiles.sales_report }}' (HEADER, DELIMITER ',');
+    outputFiles:
+      - sales_report
+  
+  - id: run_export_script
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: ghcr.io/kestra-io/pydata:latest
+    beforeCommands:
+      - pip install pandas openpyxl
+    inputFiles:
+      sales_report.csv: '{{ outputs.sales_report["outputFiles"]["sales_report"] }}'
+    outputFiles:
+      - sales_report.xlsx
+    script: |
+      import pandas as pd
+      sales_report = pd.read_csv('sales_report.csv')
+      sales_report.to_excel("sales_report.xlsx", index=False)
+  
+
   
