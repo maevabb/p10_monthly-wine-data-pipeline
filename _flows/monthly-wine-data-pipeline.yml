@@ -150,7 +150,7 @@ tasks:
     outputFiles:
       - sales_report
   
-  - id: run_convert_csv_to_excel
+  - id: convert_csv_to_excel
     type: io.kestra.plugin.scripts.python.Script
     containerImage: ghcr.io/kestra-io/pydata:latest
     beforeCommands:
@@ -170,6 +170,34 @@ tasks:
     accessKeyId: "{{ secret('AWS_ACCESS_KEY_ID') }}"
     secretKeyId: "{{ secret('AWS_ACCESS_KEY') }}"
     bucket: p10-bottleneck-reports
-    from: '{{ outputs.run_convert_csv_to_excel["outputFiles"]["sales_report.xlsx"] }}'
+    from: '{{ outputs.convert_csv_to_excel["outputFiles"]["sales_report.xlsx"] }}'
     key: sales_reports/sales_report_{{ now() | date("yyyy-MM") }}.xlsx
+
+  - id: identify_premium_wines
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: ghcr.io/kestra-io/pydata:latest
+    beforeCommands:
+      - pip install pandas
+    inputFiles:
+      sales_report.csv: '{{ outputs.sales_report["outputFiles"]["sales_report"] }}'
+    outputFiles:
+      - premium_wines.csv
+      - ordinary_wines.csv
+    script: |
+      import pandas as pd
+      from scipy.stats import zscore
+
+      df = pd.read_csv('sales_report.csv')
+
+      df['z_score'] = zscore(df['price'])
+
+      # Séparation des vins premium et ordinaires
+      premium_wines = df[df['z_score'] > 2]
+      ordinary_wines = df[df['z_score'] <= 2]
+
+      # Export CSV
+      premium_wines.to_csv("premium_wines.csv", index=False)
+      ordinary_wines.to_csv("ordinary_wines.csv", index=False)
+
+    
   
