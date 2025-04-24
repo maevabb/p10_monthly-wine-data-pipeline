@@ -1,6 +1,11 @@
 id: monthly-wine-data-pipeline
 namespace: bottleneck.reports
 
+triggers:
+  - id: monthly_trigger
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 15 * *"
+
 tasks:
   - id: convert_excels
     type: io.kestra.plugin.core.flow.WorkingDirectory
@@ -215,7 +220,5 @@ tasks:
     secretKeyId: "{{ secret('AWS_ACCESS_KEY') }}"
     bucket: p10-bottleneck-reports
     from: '{{ outputs.identify_premium_wines["outputFiles"]["ordinary_wines.csv"] }}'
-    key: wines/ordinary_wines_{{ now() | date("yyyy-MM") }}.csv  
-
-    
+    key: wines/ordinary_wines_{{ now() | date("yyyy-MM") }}.csv    
   
