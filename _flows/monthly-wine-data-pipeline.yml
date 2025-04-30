@@ -285,6 +285,32 @@ tasks:
       premium_wines.to_csv("premium_wines.csv", index=False)
       ordinary_wines.to_csv("ordinary_wines.csv", index=False)
 
+  - id: test_zscore_classification
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: ghcr.io/kestra-io/pydata:latest
+    inputFiles:
+      premium_wines.csv: '{{ outputs.identify_premium_wines["outputFiles"]["premium_wines.csv"] }}'
+      ordinary_wines.csv: '{{ outputs.identify_premium_wines["outputFiles"]["ordinary_wines.csv"] }}'
+    script: |
+      import pandas as pd
+      import sys
+
+      premium_df = pd.read_csv("premium_wines.csv")
+      ordinary_df = pd.read_csv("ordinary_wines.csv")
+
+      # Vérification de la présence de la colonne z_score
+      if 'z_score' not in premium_df.columns or 'z_score' not in ordinary_df.columns:
+          raise ValueError("La colonne 'z_score' est manquante dans l'un des fichiers.")
+
+      # Vérification des seuils
+      if not all(premium_df['z_score'] > 2):
+          raise ValueError("Certains vins premium ont un z-score ≤ 2.")
+
+      if not all(ordinary_df['z_score'] <= 2):
+          raise ValueError("Certains vins ordinaires ont un z-score > 2.")
+
+      print("Test z-score : les fichiers premium_wines et ordinary_wines sont correctement classés.")
+
   - id: export_premium_wines_to_s3
     type: io.kestra.plugin.aws.s3.Upload
     region: "{{ secret('AWS_REGION') }}"
