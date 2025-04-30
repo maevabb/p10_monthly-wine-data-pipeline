@@ -72,6 +72,36 @@ tasks:
         WHERE sku IS NOT NULL;
         
         SELECT COUNT(*) AS web_cleaned_rows FROM web;
+  
+  - id: test_no_nulls_tasks
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+    - id: test_no_nulls_erp
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) AS null_count
+        FROM erp
+        WHERE product_id IS NULL;
+
+    - id: test_no_nulls_liaison
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) AS null_count
+        FROM liaison
+        WHERE product_id IS NULL;
+
+    - id: test_no_nulls_web
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) AS null_count
+        FROM web
+        WHERE sku IS NULL;
 
   - id: clean_duplicated_tasks
     type: io.kestra.plugin.core.flow.Parallel
@@ -90,7 +120,7 @@ tasks:
         WHERE row_num = 1;
         
         SELECT COUNT(*) AS erp_cleaned_rows FROM erp;
-
+  
     - id: clean_duplicated_liaison
       type: io.kestra.plugin.jdbc.duckdb.Query
       url: 'jdbc:duckdb:/data/bottleneck.duckdb'
@@ -124,7 +154,7 @@ tasks:
   - id: join_erp_web
     type: io.kestra.plugin.jdbc.duckdb.Query
     url: 'jdbc:duckdb:/data/bottleneck.duckdb'
-    fetchOne: true
+    fetchType: FETCH
     sql: |
       CREATE OR REPLACE TABLE full_data AS
       SELECT *
@@ -137,7 +167,7 @@ tasks:
   - id: sales_report
     type: io.kestra.plugin.jdbc.duckdb.Query
     url: 'jdbc:duckdb:/data/bottleneck.duckdb'
-    fetchOne: true
+    fetchType: FETCH
     sql: |
       CREATE OR REPLACE TABLE sales_report AS
       SELECT 
