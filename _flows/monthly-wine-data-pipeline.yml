@@ -151,6 +151,33 @@ tasks:
         
         SELECT COUNT(*) AS web_cleaned_rows FROM web;
 
+  - id: test_no_duplicates_tasks
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+    - id: test_no_duplicates_erp
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) - COUNT(DISTINCT product_id) AS duplicate_count
+        FROM erp;
+
+    - id: test_no_duplicates_liaison
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) - COUNT(DISTINCT product_id) AS duplicate_count
+        FROM liaison;
+    
+    - id: test_no_duplicates_web
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) - COUNT(DISTINCT sku) AS duplicate_count
+        FROM web;
+
   - id: join_erp_web
     type: io.kestra.plugin.jdbc.duckdb.Query
     url: 'jdbc:duckdb:/data/bottleneck.duckdb'
