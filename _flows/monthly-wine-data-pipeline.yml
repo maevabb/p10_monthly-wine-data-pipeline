@@ -1,6 +1,11 @@
 id: monthly-wine-data-pipeline
 namespace: bottleneck.reports
 
+triggers:
+  - id: monthly_trigger
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 15 * *"
+
 tasks:
   - id: convert_excels
     type: io.kestra.plugin.core.flow.WorkingDirectory
@@ -67,6 +72,36 @@ tasks:
         WHERE sku IS NOT NULL;
         
         SELECT COUNT(*) AS web_cleaned_rows FROM web;
+  
+  - id: test_no_nulls_tasks
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+    - id: test_no_nulls_erp
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) AS null_count
+        FROM erp
+        WHERE product_id IS NULL;
+
+    - id: test_no_nulls_liaison
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) AS null_count
+        FROM liaison
+        WHERE product_id IS NULL;
+
+    - id: test_no_nulls_web
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) AS null_count
+        FROM web
+        WHERE sku IS NULL;
 
   - id: clean_duplicated_tasks
     type: io.kestra.plugin.core.flow.Parallel
@@ -85,7 +120,7 @@ tasks:
         WHERE row_num = 1;
         
         SELECT COUNT(*) AS erp_cleaned_rows FROM erp;
-
+  
     - id: clean_duplicated_liaison
       type: io.kestra.plugin.jdbc.duckdb.Query
       url: 'jdbc:duckdb:/data/bottleneck.duckdb'
@@ -116,10 +151,37 @@ tasks:
         
         SELECT COUNT(*) AS web_cleaned_rows FROM web;
 
+  - id: test_no_duplicates_tasks
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+    - id: test_no_duplicates_erp
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) - COUNT(DISTINCT product_id) AS duplicate_count
+        FROM erp;
+
+    - id: test_no_duplicates_liaison
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) - COUNT(DISTINCT product_id) AS duplicate_count
+        FROM liaison;
+    
+    - id: test_no_duplicates_web
+      type: io.kestra.plugin.jdbc.duckdb.Query
+      url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+      fetchType: FETCH
+      sql: |
+        SELECT COUNT(*) - COUNT(DISTINCT sku) AS duplicate_count
+        FROM web;
+
   - id: join_erp_web
     type: io.kestra.plugin.jdbc.duckdb.Query
     url: 'jdbc:duckdb:/data/bottleneck.duckdb'
-    fetchOne: true
+    fetchType: FETCH
     sql: |
       CREATE OR REPLACE TABLE full_data AS
       SELECT *
@@ -128,11 +190,26 @@ tasks:
       JOIN web ON liaison.id_web = web.sku;
 
       SELECT COUNT(*) AS full_data_row_count FROM full_data;
-
+  
+  - id: test_join_coherence
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+    fetchType: FETCH
+    sql: |
+      SELECT COUNT(*) AS missing_rows
+      FROM (
+        SELECT erp.product_id
+        FROM erp
+        JOIN liaison ON erp.product_id = liaison.product_id
+        JOIN web ON liaison.id_web = web.sku
+        EXCEPT
+        SELECT product_id FROM full_data
+      );
+    
   - id: sales_report
     type: io.kestra.plugin.jdbc.duckdb.Query
     url: 'jdbc:duckdb:/data/bottleneck.duckdb'
-    fetchOne: true
+    fetchType: FETCH
     sql: |
       CREATE OR REPLACE TABLE sales_report AS
       SELECT 
@@ -150,7 +227,16 @@ tasks:
     outputFiles:
       - sales_report
   
-  - id: run_export_script
+  - id: test_sales_ca
+    type: io.kestra.plugin.jdbc.duckdb.Query
+    url: 'jdbc:duckdb:/data/bottleneck.duckdb'
+    fetchType: FETCH
+    sql: |
+      SELECT COUNT(*) AS mismatch_count
+      FROM sales_report
+      WHERE ROUND(CA, 2) != ROUND(price * total_sales, 2);
+  
+  - id: convert_csv_to_excel
     type: io.kestra.plugin.scripts.python.Script
     containerImage: ghcr.io/kestra-io/pydata:latest
     beforeCommands:
@@ -163,6 +249,83 @@ tasks:
       import pandas as pd
       sales_report = pd.read_csv('sales_report.csv')
       sales_report.to_excel("sales_report.xlsx", index=False)
-  
 
+  - id: export_sales_to_s3
+    type: io.kestra.plugin.aws.s3.Upload
+    region: "{{ secret('AWS_REGION') }}"
+    accessKeyId: "{{ secret('AWS_ACCESS_KEY_ID') }}"
+    secretKeyId: "{{ secret('AWS_ACCESS_KEY') }}"
+    bucket: p10-bottleneck-reports
+    from: '{{ outputs.convert_csv_to_excel["outputFiles"]["sales_report.xlsx"] }}'
+    key: sales_reports/sales_report_{{ now() | date("yyyy-MM") }}.xlsx
+
+  - id: identify_premium_wines
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: ghcr.io/kestra-io/pydata:latest
+    beforeCommands:
+      - pip install pandas
+    inputFiles:
+      sales_report.csv: '{{ outputs.sales_report["outputFiles"]["sales_report"] }}'
+    outputFiles:
+      - premium_wines.csv
+      - ordinary_wines.csv
+    script: |
+      import pandas as pd
+      from scipy.stats import zscore
+
+      df = pd.read_csv('sales_report.csv')
+
+      df['z_score'] = zscore(df['price'])
+
+      # Séparation des vins premium et ordinaires
+      premium_wines = df[df['z_score'] > 2]
+      ordinary_wines = df[df['z_score'] <= 2]
+
+      # Export CSV
+      premium_wines.to_csv("premium_wines.csv", index=False)
+      ordinary_wines.to_csv("ordinary_wines.csv", index=False)
+
+  - id: test_zscore_classification
+    type: io.kestra.plugin.scripts.python.Script
+    containerImage: ghcr.io/kestra-io/pydata:latest
+    inputFiles:
+      premium_wines.csv: '{{ outputs.identify_premium_wines["outputFiles"]["premium_wines.csv"] }}'
+      ordinary_wines.csv: '{{ outputs.identify_premium_wines["outputFiles"]["ordinary_wines.csv"] }}'
+    script: |
+      import pandas as pd
+      import sys
+
+      premium_df = pd.read_csv("premium_wines.csv")
+      ordinary_df = pd.read_csv("ordinary_wines.csv")
+
+      # Vérification de la présence de la colonne z_score
+      if 'z_score' not in premium_df.columns or 'z_score' not in ordinary_df.columns:
+          raise ValueError("La colonne 'z_score' est manquante dans l'un des fichiers.")
+
+      # Vérification des seuils
+      if not all(premium_df['z_score'] > 2):
+          raise ValueError("Certains vins premium ont un z-score ≤ 2.")
+
+      if not all(ordinary_df['z_score'] <= 2):
+          raise ValueError("Certains vins ordinaires ont un z-score > 2.")
+
+      print("Test z-score : les fichiers premium_wines et ordinary_wines sont correctement classés.")
+
+  - id: export_premium_wines_to_s3
+    type: io.kestra.plugin.aws.s3.Upload
+    region: "{{ secret('AWS_REGION') }}"
+    accessKeyId: "{{ secret('AWS_ACCESS_KEY_ID') }}"
+    secretKeyId: "{{ secret('AWS_ACCESS_KEY') }}"
+    bucket: p10-bottleneck-reports
+    from: '{{ outputs.identify_premium_wines["outputFiles"]["premium_wines.csv"] }}'
+    key: wines/premium_wines_{{ now() | date("yyyy-MM") }}.csv  
+
+  - id: export_ordinary_wines_to_s3
+    type: io.kestra.plugin.aws.s3.Upload
+    region: "{{ secret('AWS_REGION') }}"
+    accessKeyId: "{{ secret('AWS_ACCESS_KEY_ID') }}"
+    secretKeyId: "{{ secret('AWS_ACCESS_KEY') }}"
+    bucket: p10-bottleneck-reports
+    from: '{{ outputs.identify_premium_wines["outputFiles"]["ordinary_wines.csv"] }}'
+    key: wines/ordinary_wines_{{ now() | date("yyyy-MM") }}.csv    
   
