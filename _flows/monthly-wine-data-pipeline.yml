@@ -22,7 +22,7 @@ tasks:
         beforeCommands:
           - pip install pandas openpyxl
         commands:
-          - python scripts/xlsx_to_csv.py
+          - python -W ignore scripts/xlsx_to_csv.py
         outputFiles:
           - erp.csv
           - web.csv
@@ -228,6 +228,7 @@ tasks:
         SELECT COUNT(*) - COUNT(DISTINCT sku) AS duplicate_count
         FROM web;
 
+
   - id: join_erp_web
     type: io.kestra.plugin.jdbc.duckdb.Query
     url: 'jdbc:duckdb:/data/bottleneck.duckdb'
@@ -240,6 +241,11 @@ tasks:
       JOIN web ON liaison.id_web = web.sku;
 
       SELECT COUNT(*) AS full_data_row_count FROM full_data;
+  
+  - id: log_join_row_count
+    type: io.kestra.plugin.core.log.Log
+    message: >
+     Join result: {{ outputs.join_erp_web["rows"][0]["full_data_row_count"] }} rows in full_data table.
   
   - id: test_join_coherence
     type: io.kestra.plugin.jdbc.duckdb.Query
@@ -378,5 +384,14 @@ tasks:
     bucket: p10-bottleneck-reports
     from: '{{ outputs.identify_premium_wines["outputFiles"]["ordinary_wines.csv"] }}'
     key: wines/ordinary_wines_{{ now() | date("yyyy-MM") }}.csv    
+
+errors:
+   - id: global_error_handler
+     type: io.kestra.plugin.core.log.Log 
+     message: >
+      Pipeline failed.
+      - Task: {{ errorLogs()[0]['taskId'] }}
+      - Error: {{ errorLogs()[0]['message'] }}
+     level: INFO
 
  
