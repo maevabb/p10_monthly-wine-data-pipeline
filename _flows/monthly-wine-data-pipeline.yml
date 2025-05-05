@@ -38,12 +38,24 @@ tasks:
         erp.csv: '{{ outputs.run_script["outputFiles"]["erp.csv"] }}'
       fetchType: FETCH
       sql: |
+        -- Read the CSV into a temporary table
+        CREATE OR REPLACE TABLE erp_raw AS
+        SELECT * FROM read_csv_auto('erp.csv', header=True);
+
+        -- Create the cleaned table
         CREATE OR REPLACE TABLE erp AS
-        SELECT *
-        FROM read_csv_auto('erp.csv', header=True)
+        SELECT * 
+        FROM erp_raw 
         WHERE product_id IS NOT NULL;
-        
-        SELECT COUNT(*) AS erp_cleaned_rows FROM erp;
+
+        -- Select the number of rows before and after cleaning
+        WITH
+          total_before AS (SELECT COUNT(*) AS erp_total_rows_before FROM erp_raw),
+          total_after AS (SELECT COUNT(*) AS erp_cleaned_rows FROM erp)
+        SELECT 
+          total_before.erp_total_rows_before,
+          total_after.erp_cleaned_rows
+        FROM total_before, total_after;
 
     - id: clean_missing_liaison
       type: io.kestra.plugin.jdbc.duckdb.Query
@@ -52,12 +64,22 @@ tasks:
         liaison.csv: '{{ outputs.run_script["outputFiles"]["liaison.csv"] }}'
       fetchType: FETCH
       sql: |
+        -- Read the CSV into a temporary table
+        CREATE OR REPLACE TABLE liaison_raw AS
+        SELECT * FROM read_csv_auto('liaison.csv', header=True);
+
+        -- Create the cleaned table
         CREATE OR REPLACE TABLE liaison AS
-        SELECT *
-        FROM read_csv_auto('liaison.csv', header=True)
-        WHERE product_id IS NOT NULL;
-        
-        SELECT COUNT(*) AS liaison_cleaned_rows FROM liaison;
+        SELECT * FROM liaison_raw WHERE product_id IS NOT NULL;
+
+        -- Select the number of rows before and after cleaninge
+        WITH
+          total_before AS (SELECT COUNT(*) AS liaison_total_rows_before FROM liaison_raw),
+          total_after AS (SELECT COUNT(*) AS liaison_cleaned_rows FROM liaison)
+        SELECT 
+          total_before.liaison_total_rows_before,
+          total_after.liaison_cleaned_rows
+        FROM total_before, total_after;
 
     - id: clean_missing_web
       type: io.kestra.plugin.jdbc.duckdb.Query
@@ -66,12 +88,31 @@ tasks:
         web.csv: '{{ outputs.run_script["outputFiles"]["web.csv"] }}'
       fetchType: FETCH
       sql: |
+        -- Read the CSV into a temporary table
+        CREATE OR REPLACE TABLE web_raw AS
+        SELECT * FROM read_csv_auto('web.csv', header=True);
+
+        -- Create the cleaned table
         CREATE OR REPLACE TABLE web AS
-        SELECT *
-        FROM read_csv_auto('web.csv', header=True)
-        WHERE sku IS NOT NULL;
-        
-        SELECT COUNT(*) AS web_cleaned_rows FROM web;
+        SELECT * FROM web_raw WHERE sku IS NOT NULL;
+
+        -- Select the number of rows before and after cleaning
+        WITH
+          total_before AS (SELECT COUNT(*) AS web_total_rows_before FROM web_raw),
+          total_after AS (SELECT COUNT(*) AS web_cleaned_rows FROM web)
+        SELECT 
+          total_before.web_total_rows_before,
+          total_after.web_cleaned_rows
+        FROM total_before, total_after;
+
+  - id: log_cleaning_missing_data
+    type: io.kestra.plugin.core.log.Log
+    message: >
+      Summary of missing values cleaning:
+      - ERP : {{ outputs.clean_missing_erp["rows"][0]["erp_total_rows_before"] }} ➝ {{ outputs.clean_missing_erp["rows"][0]["erp_cleaned_rows"] }}
+      - LIAISON : {{ outputs.clean_missing_liaison["rows"][0]["liaison_total_rows_before"] }} ➝ {{ outputs.clean_missing_liaison["rows"][0]["liaison_cleaned_rows"] }}
+      - WEB : {{ outputs.clean_missing_web["rows"][0]["web_total_rows_before"] }} ➝ {{ outputs.clean_missing_web["rows"][0]["web_cleaned_rows"] }}
+
   
   - id: test_no_nulls_tasks
     type: io.kestra.plugin.core.flow.Parallel
@@ -150,6 +191,15 @@ tasks:
         WHERE row_num = 1;
         
         SELECT COUNT(*) AS web_cleaned_rows FROM web;
+
+  - id: log_cleaning_duplicates
+    type: io.kestra.plugin.core.log.Log
+    message: >
+      Summary of duplicates cleaning:
+      - ERP : {{ outputs.clean_missing_erp["rows"][0]["erp_cleaned_rows"] }} ➝ {{ outputs.clean_duplicated_erp["rows"][0]["erp_cleaned_rows"] }}
+      - LIAISON : {{ outputs.clean_missing_liaison["rows"][0]["liaison_cleaned_rows"] }} ➝ {{ outputs.clean_duplicated_liaison["rows"][0]["liaison_cleaned_rows"] }}
+      - WEB : {{ outputs.clean_missing_web["rows"][0]["web_cleaned_rows"] }} ➝ {{ outputs.clean_duplicated_web["rows"][0]["web_cleaned_rows"] }}
+
 
   - id: test_no_duplicates_tasks
     type: io.kestra.plugin.core.flow.Parallel
@@ -328,4 +378,5 @@ tasks:
     bucket: p10-bottleneck-reports
     from: '{{ outputs.identify_premium_wines["outputFiles"]["ordinary_wines.csv"] }}'
     key: wines/ordinary_wines_{{ now() | date("yyyy-MM") }}.csv    
-  
+
+ 
