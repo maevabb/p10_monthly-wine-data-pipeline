@@ -34,6 +34,9 @@ services:
       - /tmp/kestra-wd:/tmp/kestra-wd
       - ./data:/data
       - ./flows:/app/flows   
+      - ./scripts:/scripts
+    env_file:
+      - .env
     environment:
       KESTRA_CONFIGURATION: |
         datasources:
@@ -60,6 +63,10 @@ services:
             tmpDir:
               path: /tmp/kestra-wd/tmp
           url: http://localhost:8080/
+      SECRET_GITHUB_TOKEN: 
+      SECRET_AWS_ACCESS_KEY_ID: 
+      SECRET_AWS_ACCESS_KEY: 
+      SECRET_AWS_REGION: 
     ports:
       - "8080:8080"
       - "8081:8081"
